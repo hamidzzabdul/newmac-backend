@@ -1,0 +1,19 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Deploy backend on VPS
+        run: |
+          cd /var/www/newmac-backend
+          git fetch origin
+          git reset --hard origin/master
+          npm install
+          pm2 restart newmac-backend
