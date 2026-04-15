@@ -42,7 +42,7 @@ app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 
 // Static uploads
-app.use("/uploads", express.static("public/uploads"));
+app.use("/api/v1/uploads", express.static("public/uploads"));
 
 // Health check
 app.get("/api/v1/health", (req, res) => {
@@ -71,3 +71,5 @@ app.use((req, res, next) => {
 app.use(globalErrorHandler);
 
 module.exports = app;
+
+// the autodeploy works
