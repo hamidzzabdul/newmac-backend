@@ -70,6 +70,7 @@ app.use((req, res, next) => {
 // Global error handler
 app.use(globalErrorHandler);
 
+console.log("autodeploy works");
 module.exports = app;
 
 // the autodeploy works
