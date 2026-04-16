@@ -21,6 +21,8 @@ const allowedOrigins = [
   "https://www.newmarkprimemeat.com",
 ];
 
+// i made these changes
+
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
