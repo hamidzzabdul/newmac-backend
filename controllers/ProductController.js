@@ -127,8 +127,9 @@ exports.createProduct = catchAsync(async (req, res, next) => {
 exports.getAllProducts = factory.getAll(Product);
 
 // get product by id
-exports.getProductBySlug = catchAsync(async (req, res) => {
+exports.getProductBySlug = catchAsync(async (req, res, next) => {
   const doc = await Product.findOne({ slug: req.params.slug });
+
   if (!doc) return next(new AppError("Product not found", 404));
 
   res.status(200).json(doc);
