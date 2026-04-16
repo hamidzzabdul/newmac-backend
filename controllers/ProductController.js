@@ -5,6 +5,7 @@ const AppError = require("../utils/AppError");
 const factory = require("../controllers/handlerFactory");
 const path = require("path");
 const fs = require("node:fs");
+const slugify = require("slugify");
 
 const multerStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -139,39 +140,40 @@ exports.updateProduct = catchAsync(async (req, res, next) => {
   const product = await Product.findById(req.params.id);
   if (!product) return next(new AppError("Product not found", 404));
 
-  // 1 Parse existing images
   let existingImages = [];
   if (req.body.existingImages) {
     existingImages = JSON.parse(req.body.existingImages);
   }
 
-  // 2️ Find images to delete (images that were in DB but not in existingImages)
   const imagesToDelete = product.images.filter(
     (img) => !existingImages.includes(img),
   );
 
-  // 3️ Delete removed images from filesystem
   deleteImages(imagesToDelete);
 
-  // 24 Handle new uploaded images
   const newImages = req.files?.images
     ? req.files.images.map((file) => file.filename)
     : [];
 
-  // 5 Merge images
   const images = [...existingImages, ...newImages];
 
-  // 6 Update fields
   const updatedData = {
     ...req.body,
     images,
     pricePerKg: Number(req.body.pricePerKg),
-    comparePrice: Number(req.body.comparePrice),
+    comparePrice: req.body.comparePrice ? Number(req.body.comparePrice) : null,
     stockkg: Number(req.body.stockkg),
     featured: req.body.featured === "true",
     onSale: req.body.onSale === "true",
     allowBackorder: req.body.allowBackorder === "true",
   };
+
+  if (req.body.name) {
+    updatedData.slug = slugify(req.body.name, {
+      lower: true,
+      strict: true,
+    });
+  }
 
   const doc = await Product.findByIdAndUpdate(req.params.id, updatedData, {
     new: true,

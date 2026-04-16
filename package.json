@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "nodemon server.js",
     "seed:westlands": "node utils/scripts/seedProducts.js",
-    "seed:reset": "node utils/scripts/resetStock.js"
+    "seed:reset": "node utils/scripts/resetStock.js",
+    "seed:slugs": "node utils/scripts/backfillslugs.js"
   },
   "dependencies": {
     "@clerk/express": "^1.7.60",
