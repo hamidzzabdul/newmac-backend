@@ -30,7 +30,8 @@ async function generateUniqueSlug(name, productId) {
 async function backfillProductSlugs() {
   try {
     await mongoose.connect(DB);
-
+    console.log("Connected DB name:", mongoose.connection.name);
+    console.log("Collection name:", Product.collection.name);
     const products = await Product.find({
       $or: [{ slug: { $exists: false } }, { slug: null }, { slug: "" }],
     });
