@@ -98,7 +98,7 @@ exports.createProduct = catchAsync(async (req, res, next) => {
   const images = req.files?.images?.map((file) => file.filename);
 
   if (!name || !category || !pricePerKg || !description || !stockkg) {
-    return new AppError("Missing required fields", 400);
+    return next(new AppError("Missing required fields", 400));
   }
 
   const sku = await generateSKU(category);
@@ -128,7 +128,7 @@ exports.getAllProducts = factory.getAll(Product);
 // get product by id
 exports.getProductById = catchAsync(async (req, res) => {
   const doc = await Product.findById(req.params.id);
-  if (!doc) return new AppError("Product not found", 404);
+  if (!doc) return next(new AppError("Product not found", 404));
 
   res.status(200).json(doc);
 });
