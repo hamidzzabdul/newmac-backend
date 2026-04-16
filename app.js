@@ -14,16 +14,28 @@ const notificationsroutes = require("./routes/notification");
 const PaystacksController = require("./controllers/PaystacksController");
 
 // CORS
-app.use(
-  cors({
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    exposedHeaders: ["Content-Disposition", "Content-Length", "Content-Type"],
-    credentials: true,
-  }),
-);
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://preview.newmarkprimemeat.com",
+  "https://newmarkprimemeat.com",
+  "https://www.newmarkprimemeat.com",
+];
 
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("/*splat", cors(corsOptions));
 // Logging
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
