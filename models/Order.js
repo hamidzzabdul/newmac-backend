@@ -19,10 +19,9 @@ const orderSchema = new mongoose.Schema(
     orderNumber: { type: String, required: true, unique: true },
 
     customer: {
-      firstName: { type: String, required: true },
-      lastName: { type: String },
-      email: { type: String, required: true },
-      phone: { type: String, required: true },
+      fullName: { type: String, required: true, trim: true },
+      phone: { type: String, required: true, trim: true },
+      email: { type: String, trim: true }, // optional now
     },
 
     items: { type: [orderItemSchema], default: [] },
@@ -31,12 +30,18 @@ const orderSchema = new mongoose.Schema(
     shippingFee: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
 
+    fulfillment: {
+      method: {
+        type: String,
+        enum: ["home_delivery", "pickup"],
+        required: true,
+        default: "home_delivery",
+      },
+    },
+
     shippingAddress: {
-      street: String,
-      city: String,
-      postalCode: { type: String },
-      deliveryNotes: { type: String },
-      country: { type: String, default: "Kenya" },
+      location: { type: String, trim: true }, // e.g. "Eastleigh, Nairobi"
+      additionalInfo: { type: String, trim: true }, // landmark, gate, notes
     },
 
     payment: {
@@ -51,7 +56,7 @@ const orderSchema = new mongoose.Schema(
         default: "pending",
         index: true,
       },
-      // M-Pesa fields
+
       phone: { type: String },
       merchantRequestID: { type: String },
       checkoutRequestID: { type: String, index: true },
@@ -61,7 +66,6 @@ const orderSchema = new mongoose.Schema(
       resultDesc: { type: String },
       callbackRaw: { type: mongoose.Schema.Types.Mixed },
 
-      // Paystack card fields
       card: {
         provider: { type: String },
         paymentIntentId: { type: String },
@@ -78,14 +82,17 @@ const orderSchema = new mongoose.Schema(
     orderStatus: {
       type: String,
       enum: [
-        "pending",
+        "pending_payment",
         "confirmed",
         "processing",
         "shipped",
+        "ready_for_pickup",
         "delivered",
+        "picked_up",
         "cancelled",
+        "payment_failed",
       ],
-      default: "pending",
+      default: "pending_payment",
       index: true,
     },
 
@@ -94,8 +101,6 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// ✅ Both hooks are async with NO next() parameter.
-// Mixing async + next() causes "next is not a function" on Order.create()
 orderSchema.pre("validate", async function () {
   if (!this.orderNumber) {
     const count = await mongoose.model("Order").countDocuments();
@@ -107,4 +112,5 @@ orderSchema.pre("save", async function () {
   this.total = this.subtotal + this.shippingFee;
 });
 
+module.exports = mongoose.model("Order", orderSchema);
 module.exports = mongoose.model("Order", orderSchema);

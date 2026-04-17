@@ -4,19 +4,26 @@ const catchAsync = require("../utils/catchAsync");
 const AppError = require("../utils/AppError");
 
 exports.createOrder = catchAsync(async (req, res, next) => {
-  const { items, shippingAddress, customer, paymentMethod } = req.body;
-  const { firstName, email, phone } = customer;
+  const { items, customer, paymentMethod, fulfillmentMethod, shippingAddress } =
+    req.body;
+
+  const { fullName, phone, email } = customer || {};
 
   if (!items || items.length === 0) {
     return next(new AppError("Order must contain at least one item", 400));
   }
 
-  if (!firstName || !email || !phone) {
-    return next(new AppError("Customer information is required", 400));
+  if (!fullName || !phone) {
+    return next(new AppError("Full name and phone number are required", 400));
   }
 
-  if (!shippingAddress || !shippingAddress.city || !shippingAddress.street) {
-    return next(new AppError("Shipping address is required", 400));
+  const finalFulfillmentMethod = fulfillmentMethod || "home_delivery";
+
+  if (
+    finalFulfillmentMethod === "home_delivery" &&
+    (!shippingAddress || !shippingAddress.location)
+  ) {
+    return next(new AppError("Location is required for home delivery", 400));
   }
 
   const orderItems = [];
@@ -53,19 +60,37 @@ exports.createOrder = catchAsync(async (req, res, next) => {
     });
   }
 
-  const shippingFee = 0;
+  // You can later make this dynamic
+  const shippingFee = finalFulfillmentMethod === "home_delivery" ? 150 : 0;
+
+  const savedEmail = email || req.user?.email || "";
 
   const order = await Order.create({
-    customer: { firstName, email, phone },
+    customer: {
+      fullName,
+      phone,
+      email: savedEmail,
+    },
     items: orderItems,
     subtotal,
     shippingFee,
-    total: subtotal + shippingFee, // ✅ pass total explicitly so pre("save") has it
-    shippingAddress,
-    orderStatus: "pending",
-    payment: { status: "pending", method: paymentMethod },
+    total: subtotal + shippingFee,
+    fulfillment: {
+      method: finalFulfillmentMethod,
+    },
+    shippingAddress: {
+      location:
+        finalFulfillmentMethod === "home_delivery"
+          ? shippingAddress?.location || ""
+          : "",
+      additionalInfo: shippingAddress?.additionalInfo || "",
+    },
+    orderStatus: "pending_payment",
+    payment: {
+      status: "pending",
+      method: paymentMethod || "mpesa",
+    },
   });
-
   res.status(201).json({
     status: "success",
     message: "Order created successfully",
@@ -76,7 +101,10 @@ exports.createOrder = catchAsync(async (req, res, next) => {
         total: order.total,
         items: order.items,
         customer: order.customer,
+        fulfillment: order.fulfillment,
         shippingAddress: order.shippingAddress,
+        orderStatus: order.orderStatus,
+        payment: order.payment,
         createdAt: order.createdAt,
       },
     },
@@ -85,9 +113,22 @@ exports.createOrder = catchAsync(async (req, res, next) => {
 
 exports.getOrderById = catchAsync(async (req, res, next) => {
   const order = await Order.findById(req.params.orderId).lean();
-  if (!order) return next(new AppError("Order not found", 404));
 
-  res.json({ status: "success", data: { order } });
+  if (!order) {
+    return next(new AppError("Order not found", 404));
+  }
+
+  const isAdmin = req.user?.role === "admin";
+  const userEmail = req.user?.email;
+
+  if (!isAdmin && order.customer?.email !== userEmail) {
+    return next(new AppError("Order not found", 404));
+  }
+
+  res.status(200).json({
+    status: "success",
+    data: { order },
+  });
 });
 
 exports.getMyOrders = catchAsync(async (req, res, next) => {
@@ -107,9 +148,9 @@ exports.getMyOrders = catchAsync(async (req, res, next) => {
 exports.getAllOrders = catchAsync(async (req, res, next) => {
   const orders = await Order.find()
     .sort({ createdAt: -1 })
-    // ✅ Select the full payment object (not just payment.status)
-    // so the frontend gets method, paidAt, status, etc.
-    .select("orderNumber total orderStatus payment createdAt items customer");
+    .select(
+      "orderNumber subtotal shippingFee total orderStatus payment createdAt items customer fulfillment shippingAddress",
+    );
 
   res.status(200).json({
     status: "success",
@@ -123,12 +164,13 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
   const { status } = req.body;
 
   const validStatuses = [
-    "pending",
+    "pending_payment",
+    "confirmed",
     "processing",
     "shipped",
     "delivered",
     "cancelled",
-    "confirmed",
+    "payment_failed",
   ];
 
   if (!status || !validStatuses.includes(status)) {
@@ -146,11 +188,54 @@ exports.updateOrderStatus = catchAsync(async (req, res, next) => {
     { new: true, runValidators: true },
   ).lean();
 
-  if (!order) return next(new AppError("Order not found", 404));
+  if (!order) {
+    return next(new AppError("Order not found", 404));
+  }
 
   res.json({
     status: "success",
     message: "Order status updated successfully",
+    data: { order },
+  });
+});
+
+exports.cancelUnpaidOrder = catchAsync(async (req, res, next) => {
+  const { orderId } = req.params;
+
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    return next(new AppError("Order not found", 404));
+  }
+
+  // Optional ownership check
+  if (order.customer?.email !== req.user.email) {
+    return next(new AppError("You are not allowed to cancel this order", 403));
+  }
+
+  if (order.payment?.status === "paid") {
+    return next(new AppError("Paid orders cannot be cancelled here", 400));
+  }
+
+  if (
+    order.orderStatus === "cancelled" ||
+    order.orderStatus === "payment_failed"
+  ) {
+    return res.status(200).json({
+      status: "success",
+      message: "Order already closed",
+      data: { order },
+    });
+  }
+
+  order.orderStatus = "cancelled";
+  order.payment.status = "failed";
+  order.payment.failureReason = "Customer cancelled before payment";
+  await order.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Order cancelled successfully",
     data: { order },
   });
 });

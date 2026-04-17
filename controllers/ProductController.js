@@ -6,6 +6,7 @@ const factory = require("../controllers/handlerFactory");
 const path = require("path");
 const fs = require("node:fs");
 const slugify = require("slugify");
+const APIFeatures = require("../utils/APIFeatures");
 
 const multerStorage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -124,7 +125,82 @@ exports.createProduct = catchAsync(async (req, res, next) => {
 });
 
 // get All products
-exports.getAllProducts = factory.getAll(Product);
+// exports.getAllProducts = factory.getAll(Product);
+
+exports.getAllProducts = catchAsync(async (req, res, next) => {
+  const queryObj = { ...req.query };
+
+  // Build custom filter
+  const mongoFilter = {};
+
+  // Search by name
+  if (queryObj.search && queryObj.search.trim() !== "") {
+    mongoFilter.name = {
+      $regex: queryObj.search.trim(),
+      $options: "i",
+    };
+  }
+
+  // Filter by category
+  if (queryObj.category && queryObj.category.trim() !== "") {
+    mongoFilter.category = queryObj.category.trim().toLowerCase();
+  }
+
+  // Filter visible products only for public shop
+  mongoFilter.visibility = "visible";
+
+  // In stock only
+  if (queryObj.inStock === "true") {
+    mongoFilter.stockkg = { $gt: 0 };
+  }
+
+  // Map frontend sort values to mongoose sort syntax
+  let sortValue = "-createdAt";
+  if (queryObj.sort === "price-low") sortValue = "pricePerKg";
+  if (queryObj.sort === "price-high") sortValue = "-pricePerKg";
+  if (queryObj.sort === "name") sortValue = "name";
+  if (queryObj.sort === "oldest") sortValue = "createdAt";
+
+  // Create a clean query object for APIFeatures
+  const featuresQuery = {
+    ...queryObj,
+    ...mongoFilter,
+    sort: sortValue,
+  };
+
+  // remove non-direct Mongo fields that APIFeatures.filter() should not see
+  delete featuresQuery.search;
+  delete featuresQuery.inStock;
+
+  // Count total before pagination
+  const countFeaturesQuery = { ...featuresQuery };
+  const excludedFields = ["page", "sort", "limit", "fields"];
+  excludedFields.forEach((el) => delete countFeaturesQuery[el]);
+
+  const total = await Product.countDocuments(countFeaturesQuery);
+
+  // Main query
+  const features = new APIFeatures(Product.find(), featuresQuery)
+    .filter()
+    .sort()
+    .limitFields()
+    .paginate();
+
+  const docs = await features.query;
+
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const limit = Math.max(Number(req.query.limit) || 12, 1);
+  const totalPages = Math.ceil(total / limit) || 1;
+
+  res.status(200).json({
+    status: "success",
+    result: docs.length,
+    total,
+    totalPages,
+    currentPage: page,
+    docs,
+  });
+});
 
 // get product by id
 exports.getProductBySlug = catchAsync(async (req, res, next) => {

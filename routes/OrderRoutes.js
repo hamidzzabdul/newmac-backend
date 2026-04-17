@@ -19,11 +19,18 @@ router.get(
 // Get all orders for the authenticated user
 router.get("/my-orders", authController.protect, orderController.getMyOrders);
 
+router.patch(
+  "/:orderId/cancel",
+  authController.protect,
+  orderController.cancelUnpaidOrder,
+);
+
 // Paystack
 router.post("/:id/paystack/initialize", paystackController.initalizePayment);
 router.get("/:id/paystack/verify", paystackController.verifyTransaction);
 
-// Get all orders (admin only)
+// Get Single order
+router.get("/:orderId", authController.protect, orderController.getOrderById);
 
 // Get single order
 router.get(
