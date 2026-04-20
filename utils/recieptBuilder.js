@@ -651,8 +651,15 @@ async function generateReceiptBuffer(order) {
   const browser = await puppeteer.launch({
     headless: "new",
     executablePath:
-      process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/google-chrome",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process",
+    ],
   });
 
   try {
