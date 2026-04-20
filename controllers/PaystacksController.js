@@ -48,9 +48,18 @@ exports.initalizePayment = catchAsync(async (req, res, next) => {
   if (!order) {
     return next(new AppError("Order not found", 404));
   }
+  const isAdmin = req.user?.role === "admin";
+
+  if (!isAdmin && order.customer?.email !== req.user?.email) {
+    return next(new AppError("You are not allowed to pay for this order", 403));
+  }
 
   if (order.payment?.status === "paid") {
-    return next(new AppError("Order already paid", 400));
+    return next(new AppError("This order is already paid", 400));
+  }
+
+  if (order.orderStatus === "cancelled") {
+    return next(new AppError("Cancelled orders cannot be paid", 400));
   }
 
   if (

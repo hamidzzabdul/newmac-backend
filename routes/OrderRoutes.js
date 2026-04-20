@@ -26,7 +26,11 @@ router.patch(
 );
 
 // Paystack
-router.post("/:id/paystack/initialize", paystackController.initalizePayment);
+router.post(
+  "/:id/paystack/initialize",
+  authController.protect,
+  paystackController.initalizePayment,
+);
 router.get("/:id/paystack/verify", paystackController.verifyTransaction);
 
 // Get Single order
