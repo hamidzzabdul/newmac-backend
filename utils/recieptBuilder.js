@@ -4,9 +4,12 @@ const fs = require("fs");
 
 // ── Format currency ──────────────────────────────────────────────────────────
 const ksh = (n) =>
-  `KSh ${Number(n || 0).toLocaleString("en-KE", { minimumFractionDigits: 2 })}`;
+  `KSh ${Number(n || 0).toLocaleString("en-KE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
-// ── Format date ───────────────────────────────────────────────────────────────
+// ── Format date ──────────────────────────────────────────────────────────────
 const formatDate = (d) =>
   new Date(d || Date.now()).toLocaleDateString("en-KE", {
     day: "2-digit",
@@ -14,21 +17,55 @@ const formatDate = (d) =>
     year: "numeric",
   });
 
-// ── Encode logo to base64 so Puppeteer can embed it ──────────────────────────
+// ── Safe text helpers ────────────────────────────────────────────────────────
+const safe = (value, fallback = "—") => {
+  if (value === null || value === undefined) return fallback;
+  const str = String(value).trim();
+  return str ? str : fallback;
+};
+
+const humanizeStatus = (status) => {
+  if (!status) return "Confirmed";
+  return String(status)
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
+// ── Encode logo to base64 so Puppeteer can embed it ─────────────────────────
 function getLogoBase64() {
-  try {
-    const logoPath = path.resolve(__dirname, "../public/assets/logo.png");
-    const data = fs.readFileSync(logoPath);
-    return `data:image/png;base64,${data.toString("base64")}`;
-  } catch {
-    return null; // gracefully degrade if logo not found
+  const candidatePaths = [
+    path.resolve(__dirname, "../public/assets/logo.jpeg"),
+    path.resolve(__dirname, "../public/assets/logo.jpg"),
+    path.resolve(__dirname, "../public/assets/logo.png"),
+  ];
+
+  for (const logoPath of candidatePaths) {
+    try {
+      if (fs.existsSync(logoPath)) {
+        const data = fs.readFileSync(logoPath);
+        const ext = path.extname(logoPath).toLowerCase();
+        const mime =
+          ext === ".png"
+            ? "image/png"
+            : ext === ".jpg" || ext === ".jpeg"
+              ? "image/jpeg"
+              : "image/png";
+
+        return `data:${mime};base64,${data.toString("base64")}`;
+      }
+    } catch {
+      // continue to next candidate
+    }
   }
+
+  return null;
 }
 
-// ── HTML TEMPLATE ─────────────────────────────────────────────────────────────
+// ── HTML TEMPLATE ────────────────────────────────────────────────────────────
 function generateReceiptHTML(order) {
   const logo = getLogoBase64();
-  const paidAt = order.payment?.paidAt || order.updatedAt || new Date();
+  const paidAt = order.payment?.paidAt || order.updatedAt || order.createdAt;
   const paymentMethod =
     order.payment?.method === "mpesa"
       ? "M-Pesa"
@@ -38,21 +75,72 @@ function generateReceiptHTML(order) {
           ? "Cash on Delivery"
           : "—";
 
-  const subtotal = order.items.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0,
-  );
+  const subtotal = Array.isArray(order.items)
+    ? order.items.reduce(
+        (sum, item) =>
+          sum + Number(item.price || 0) * Number(item.quantity || 0),
+        0,
+      )
+    : Number(order.subtotal || 0);
+
+  const shippingFee = Number(order.shippingFee || 0);
+  const total = Number(order.total || subtotal + shippingFee);
+  const isPickup = order.fulfillment?.method === "pickup";
+  const customerName = safe(order.customer?.fullName, "Customer");
+  const customerEmail = safe(order.customer?.email, "—");
+  const customerPhone = safe(order.customer?.phone, "—");
+  const receiptNumber = safe(order.orderNumber, "Order Receipt");
+  const paymentStatus = safe(order.payment?.status, "paid").toLowerCase();
+  const paidLabel =
+    paymentStatus === "paid"
+      ? "Paid"
+      : paymentStatus === "pending"
+        ? "Pending"
+        : paymentStatus === "failed"
+          ? "Failed"
+          : humanizeStatus(paymentStatus);
+
+  const paymentBadgeClass =
+    paymentStatus === "paid"
+      ? "badge-success"
+      : paymentStatus === "pending"
+        ? "badge-warning"
+        : "badge-danger";
+
+  const deliveryBlock = isPickup
+    ? `
+      <p class="address-line">Pickup at shop</p>
+      <p class="muted" style="margin-top:4px;">Customer will collect the order from the store.</p>
+    `
+    : `
+      <p class="address-line">${safe(order.shippingAddress?.location, "—")}</p>
+      ${
+        order.shippingAddress?.additionalInfo
+          ? `<p class="muted" style="margin-top:4px;font-style:italic;">"${safe(order.shippingAddress.additionalInfo, "")}"</p>`
+          : ""
+      }
+    `;
+
+  const receiptRef =
+    order.payment?.mpesaReceiptNumber ||
+    order.payment?.card?.chargeId ||
+    order.payment?.checkoutRequestID ||
+    "—";
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Receipt · ${order.orderNumber}</title>
+  <title>Receipt · ${receiptNumber}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
       font-family: 'Inter', Arial, sans-serif;
@@ -64,7 +152,6 @@ function generateReceiptHTML(order) {
       print-color-adjust: exact;
     }
 
-    /* ── Page shell ── */
     .page {
       width: 794px;
       min-height: 1123px;
@@ -74,7 +161,6 @@ function generateReceiptHTML(order) {
       flex-direction: column;
     }
 
-    /* ── Header ── */
     .header {
       background: #0d0d0d;
       padding: 36px 48px 32px;
@@ -90,7 +176,7 @@ function generateReceiptHTML(order) {
     }
 
     .logo-img {
-      height: 44px;
+      height: 48px;
       width: auto;
       object-fit: contain;
     }
@@ -103,15 +189,15 @@ function generateReceiptHTML(order) {
 
     .brand-name {
       font-size: 22px;
-      font-weight: 700;
+      font-weight: 800;
       color: #ffffff;
       letter-spacing: 0.04em;
     }
 
     .brand-sub {
       font-size: 11px;
-      color: #888888;
-      font-weight: 400;
+      color: #9ca3af;
+      font-weight: 500;
       letter-spacing: 0.08em;
       text-transform: uppercase;
     }
@@ -125,7 +211,7 @@ function generateReceiptHTML(order) {
       font-weight: 600;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: #555555;
+      color: #6b7280;
       margin-bottom: 4px;
     }
 
@@ -136,7 +222,6 @@ function generateReceiptHTML(order) {
       letter-spacing: 0.02em;
     }
 
-    /* ── Status band ── */
     .status-band {
       background: #16a34a;
       padding: 10px 48px;
@@ -150,7 +235,7 @@ function generateReceiptHTML(order) {
       align-items: center;
       gap: 8px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
       color: #ffffff;
       letter-spacing: 0.06em;
       text-transform: uppercase;
@@ -165,17 +250,16 @@ function generateReceiptHTML(order) {
 
     .status-date {
       font-size: 11px;
-      color: #bbf7d0;
-      font-weight: 400;
+      color: #dcfce7;
+      font-weight: 500;
     }
 
-    /* ── Body ── */
     .body {
       padding: 40px 48px;
       flex: 1;
+      position: relative;
     }
 
-    /* ── Two-column meta ── */
     .meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -187,40 +271,38 @@ function generateReceiptHTML(order) {
 
     .meta-block h4 {
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      color: #999999;
+      color: #9ca3af;
       margin-bottom: 10px;
     }
 
     .meta-block p {
       font-size: 13px;
-      color: #1a1a1a;
+      color: #111827;
       font-weight: 500;
       margin-bottom: 3px;
     }
 
     .meta-block p.muted {
       font-size: 12px;
-      color: #666666;
+      color: #6b7280;
       font-weight: 400;
     }
 
-    /* ── Delivery address ── */
     .address-line {
       font-size: 12px;
-      color: #666666;
+      color: #4b5563;
       line-height: 1.7;
     }
 
-    /* ── Items table ── */
     .section-label {
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      color: #999999;
+      color: #9ca3af;
       margin-bottom: 12px;
     }
 
@@ -238,10 +320,10 @@ function generateReceiptHTML(order) {
     thead th {
       padding: 10px 14px;
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #888888;
+      color: #6b7280;
       text-align: left;
     }
 
@@ -258,15 +340,15 @@ function generateReceiptHTML(order) {
     tbody td {
       padding: 13px 14px;
       font-size: 13px;
-      color: #1a1a1a;
+      color: #111827;
       vertical-align: middle;
     }
 
     tbody td.right { text-align: right; }
-    tbody td.muted { color: #666666; }
+    tbody td.muted { color: #6b7280; }
 
     .item-name {
-      font-weight: 500;
+      font-weight: 600;
     }
 
     .item-qty {
@@ -274,12 +356,11 @@ function generateReceiptHTML(order) {
       background: #f0f0ec;
       color: #555555;
       font-size: 11px;
-      font-weight: 500;
+      font-weight: 600;
       padding: 2px 8px;
       border-radius: 99px;
     }
 
-    /* ── Totals ── */
     .totals {
       margin-top: 4px;
       display: flex;
@@ -299,17 +380,17 @@ function generateReceiptHTML(order) {
 
     .totals-row .label {
       font-size: 12px;
-      color: #888888;
-      min-width: 80px;
+      color: #6b7280;
+      min-width: 90px;
       text-align: right;
     }
 
     .totals-row .value {
       font-size: 13px;
-      color: #1a1a1a;
-      min-width: 100px;
+      color: #111827;
+      min-width: 120px;
       text-align: right;
-      font-weight: 500;
+      font-weight: 600;
     }
 
     .totals-row.free .value {
@@ -324,18 +405,17 @@ function generateReceiptHTML(order) {
 
     .totals-row.grand .label {
       font-size: 12px;
-      font-weight: 600;
-      color: #888888;
+      font-weight: 700;
+      color: #9ca3af;
       letter-spacing: 0.04em;
     }
 
     .totals-row.grand .value {
       font-size: 16px;
-      font-weight: 700;
+      font-weight: 800;
       color: #ffffff;
     }
 
-    /* ── Payment info ── */
     .payment-row {
       margin-top: 32px;
       padding: 16px 20px;
@@ -345,46 +425,71 @@ function generateReceiptHTML(order) {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 24px;
     }
 
     .payment-row h4 {
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.1em;
       text-transform: uppercase;
-      color: #999999;
+      color: #9ca3af;
       margin-bottom: 4px;
     }
 
     .payment-row p {
       font-size: 13px;
-      font-weight: 500;
-      color: #1a1a1a;
+      font-weight: 600;
+      color: #111827;
     }
 
-    .paid-badge {
+    .payment-info-secondary {
+      margin-top: 6px;
+      font-size: 12px !important;
+      font-weight: 400 !important;
+      color: #6b7280 !important;
+    }
+
+    .paid-badge,
+    .badge-success,
+    .badge-warning,
+    .badge-danger {
       display: flex;
       align-items: center;
       gap: 6px;
-      background: #dcfce7;
-      color: #15803d;
       font-size: 11px;
-      font-weight: 700;
+      font-weight: 800;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       padding: 6px 14px;
       border-radius: 99px;
+    }
+
+    .badge-success {
+      background: #dcfce7;
+      color: #15803d;
       border: 1px solid #bbf7d0;
+    }
+
+    .badge-warning {
+      background: #fef3c7;
+      color: #b45309;
+      border: 1px solid #fde68a;
+    }
+
+    .badge-danger {
+      background: #fee2e2;
+      color: #b91c1c;
+      border: 1px solid #fecaca;
     }
 
     .paid-badge-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #16a34a;
+      background: currentColor;
     }
 
-    /* ── Footer ── */
     .footer {
       margin-top: auto;
       padding: 24px 48px;
@@ -392,28 +497,22 @@ function generateReceiptHTML(order) {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 20px;
     }
 
     .footer p {
       font-size: 11px;
-      color: #aaaaaa;
+      color: #9ca3af;
     }
 
     .footer .brand-mark {
       font-size: 12px;
-      font-weight: 600;
-      color: #cccccc;
+      font-weight: 700;
+      color: #d1d5db;
       letter-spacing: 0.06em;
+      white-space: nowrap;
     }
 
-    /* ── Divider ── */
-    .divider {
-      height: 1px;
-      background: #e8e8e4;
-      margin: 28px 0;
-    }
-
-    /* ── Watermark ── */
     .watermark {
       position: absolute;
       bottom: 120px;
@@ -428,164 +527,150 @@ function generateReceiptHTML(order) {
   </style>
 </head>
 <body>
-<div class="page">
+  <div class="page">
 
-  <!-- ── Header ── -->
-  <div class="header">
-    <div class="header-left">
-      ${
-        logo
-          ? `<img src="${logo}" alt="New Mark" class="logo-img" />`
-          : `<div class="logo-fallback">
-               <div class="brand-name">NEW MARK</div>
-               <div class="brand-sub">Premium Fresh Meat</div>
-             </div>`
-      }
-    </div>
-    <div class="header-right">
-      <div class="receipt-label">Receipt</div>
-      <div class="receipt-number">#${order.orderNumber}</div>
-    </div>
-  </div>
-
-  <!-- ── Status band ── -->
-  <div class="status-band">
-    <div class="status-paid">
-      <div class="status-dot"></div>
-      Payment confirmed
-    </div>
-    <div class="status-date">${formatDate(paidAt)}</div>
-  </div>
-
-  <!-- ── Body ── -->
-  <div class="body" style="position:relative;">
-
-    <div class="watermark">PAID</div>
-
-    <!-- ── Meta: customer + delivery ── -->
-    <div class="meta-grid">
-      <div class="meta-block">
-        <h4>Billed to</h4>
-        <p>${order.customer.firstName}${order.customer.lastName ? " " + order.customer.lastName : ""}</p>
-        <p class="muted">${order.customer.email}</p>
-        <p class="muted">${order.customer.phone || "—"}</p>
-      </div>
-
-      <div class="meta-block">
-        <h4>Delivery address</h4>
+    <div class="header">
+      <div class="header-left">
         ${
-          order.shippingAddress
-            ? `<p class="address-line">
-                ${order.shippingAddress.street || ""}${order.shippingAddress.street ? "," : ""}
-                ${order.shippingAddress.city || ""}
-                ${order.shippingAddress.postalCode ? "· " + order.shippingAddress.postalCode : ""}
-               </p>
-               ${order.shippingAddress.deliveryNotes ? `<p class="muted" style="margin-top:4px;font-style:italic;">"${order.shippingAddress.deliveryNotes}"</p>` : ""}`
-            : `<p class="muted">—</p>`
+          logo
+            ? `<img src="${logo}" alt="Newmark Prime Meat" class="logo-img" />`
+            : `<div class="logo-fallback">
+                <div class="brand-name">NEWMARK PRIME MEAT</div>
+                <div class="brand-sub">Best meat supplier in Nairobi</div>
+              </div>`
         }
       </div>
-
-      <div class="meta-block">
-        <h4>Order date</h4>
-        <p>${formatDate(order.createdAt)}</p>
-        <p class="muted">Order #${order.orderNumber}</p>
-      </div>
-
-      <div class="meta-block">
-        <h4>Order status</h4>
-        <p>${order.orderStatus ? order.orderStatus.charAt(0).toUpperCase() + order.orderStatus.slice(1) : "Confirmed"}</p>
-        <p class="muted">Payment received</p>
+      <div class="header-right">
+        <div class="receipt-label">Receipt</div>
+        <div class="receipt-number">#${receiptNumber}</div>
       </div>
     </div>
 
-    <!-- ── Items ── -->
-    <div class="section-label">Order items</div>
-    <table>
-      <thead>
-        <tr>
-          <th>Item</th>
-          <th>Unit price</th>
-          <th class="right">Qty (kg)</th>
-          <th class="right">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${order.items
-          .map(
-            (item) => `
+    <div class="status-band">
+      <div class="status-paid">
+        <div class="status-dot"></div>
+        Payment confirmed
+      </div>
+      <div class="status-date">${formatDate(paidAt)}</div>
+    </div>
+
+    <div class="body">
+      <div class="watermark">PAID</div>
+
+      <div class="meta-grid">
+        <div class="meta-block">
+          <h4>Billed to</h4>
+          <p>${customerName}</p>
+          <p class="muted">${customerEmail}</p>
+          <p class="muted">${customerPhone}</p>
+        </div>
+
+        <div class="meta-block">
+          <h4>${isPickup ? "Pickup details" : "Delivery address"}</h4>
+          ${deliveryBlock}
+        </div>
+
+        <div class="meta-block">
+          <h4>Order date</h4>
+          <p>${formatDate(order.createdAt)}</p>
+          <p class="muted">Order #${receiptNumber}</p>
+        </div>
+
+        <div class="meta-block">
+          <h4>Order status</h4>
+          <p>${humanizeStatus(order.orderStatus)}</p>
+          <p class="muted">Payment ${paymentStatus === "paid" ? "received" : humanizeStatus(paymentStatus).toLowerCase()}</p>
+        </div>
+      </div>
+
+      <div class="section-label">Order items</div>
+      <table>
+        <thead>
           <tr>
-            <td class="item-name">${item.product?.name || item.name || "Meat"}</td>
-            <td class="muted">${ksh(item.price)}/kg</td>
-            <td class="right"><span class="item-qty">${Number(item.quantity).toFixed(2)} kg</span></td>
-            <td class="right">${ksh(item.price * item.quantity)}</td>
-          </tr>`,
-          )
-          .join("")}
-      </tbody>
-    </table>
+            <th>Item</th>
+            <th>Unit price</th>
+            <th class="right">Qty</th>
+            <th class="right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(order.items || [])
+            .map(
+              (item) => `
+            <tr>
+              <td class="item-name">${safe(item.product?.name || item.name || "Meat")}</td>
+              <td class="muted">${ksh(item.price)}/kg</td>
+              <td class="right"><span class="item-qty">${Number(item.quantity || 0).toFixed(2)} kg</span></td>
+              <td class="right">${ksh(Number(item.price || 0) * Number(item.quantity || 0))}</td>
+            </tr>`,
+            )
+            .join("")}
+        </tbody>
+      </table>
 
-    <!-- ── Totals ── -->
-    <div class="totals">
-      <div class="totals-row">
-        <span class="label">Subtotal</span>
-        <span class="value">${ksh(subtotal)}</span>
+      <div class="totals">
+        <div class="totals-row">
+          <span class="label">Subtotal</span>
+          <span class="value">${ksh(subtotal)}</span>
+        </div>
+        <div class="totals-row ${shippingFee === 0 ? "free" : ""}">
+          <span class="label">${isPickup ? "Pickup" : "Delivery"}</span>
+          <span class="value">${shippingFee === 0 ? "Free" : ksh(shippingFee)}</span>
+        </div>
+        <div class="totals-row grand">
+          <span class="label">Total paid</span>
+          <span class="value">${ksh(total)}</span>
+        </div>
       </div>
-      <div class="totals-row free">
-        <span class="label">Delivery</span>
-        <span class="value">Free</span>
-      </div>
-      <div class="totals-row grand">
-        <span class="label">Total paid</span>
-        <span class="value">${ksh(order.total)}</span>
+
+      <div class="payment-row">
+        <div>
+          <h4>Payment method</h4>
+          <p>${paymentMethod}</p>
+          <p class="payment-info-secondary">Reference: ${safe(receiptRef)}</p>
+        </div>
+        <div class="${paymentBadgeClass}">
+          <div class="paid-badge-dot"></div>
+          ${paidLabel}
+        </div>
       </div>
     </div>
 
-    <!-- ── Payment info ── -->
-    <div class="payment-row">
-      <div>
-        <h4>Payment method</h4>
-        <p>${paymentMethod}</p>
-      </div>
-      <div class="paid-badge">
-        <div class="paid-badge-dot"></div>
-        Paid
-      </div>
+    <div class="footer">
+      <p>Thank you for shopping with Newmark Prime Meat · For support, contact info@newmarkprimemeat.com</p>
+      <div class="brand-mark">NEWMARK PRIME MEAT</div>
     </div>
 
-  </div><!-- /body -->
-
-  <!-- ── Footer ── -->
-  <div class="footer">
-    <p>Thank you for shopping with New Mark · Questions? support@newmark.co.ke</p>
-    <div class="brand-mark">NEW MARK</div>
   </div>
-
-</div>
 </body>
 </html>`;
 }
 
-// ── GENERATE PDF BUFFER ────────────────────────────────────────────────────────
+// ── GENERATE PDF BUFFER ──────────────────────────────────────────────────────
 async function generateReceiptBuffer(order) {
   const browser = await puppeteer.launch({
     headless: "new",
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    executablePath:
+      process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium-browser",
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
-  const page = await browser.newPage();
-  const html = generateReceiptHTML(order);
+  try {
+    const page = await browser.newPage();
+    const html = generateReceiptHTML(order);
 
-  await page.setContent(html, { waitUntil: "networkidle0" }); // wait for Google Fonts
+    await page.setContent(html, { waitUntil: "networkidle0" });
 
-  const buffer = await page.pdf({
-    format: "A4",
-    printBackground: true,
-    margin: { top: "0", right: "0", bottom: "0", left: "0" },
-  });
+    const buffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "0", right: "0", bottom: "0", left: "0" },
+    });
 
-  await browser.close();
-  return buffer;
+    return buffer;
+  } finally {
+    await browser.close();
+  }
 }
 
 module.exports = { generateReceiptBuffer };
