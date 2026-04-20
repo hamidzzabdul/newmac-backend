@@ -12,11 +12,14 @@ const generateReceipt = async (req, res) => {
 
     console.log("📄 Generating receipt for order:", order.orderNumber);
 
-    const pdfBuffer = await generateReceiptBuffer(order);
+    const pdfData = await generateReceiptBuffer(order);
+    const pdfBuffer = Buffer.isBuffer(pdfData) ? pdfData : Buffer.from(pdfData);
 
-    if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer) || pdfBuffer.length < 1000) {
+    console.log("📦 Buffer size:", pdfBuffer.length);
+
+    if (!pdfBuffer || pdfBuffer.length < 1000) {
       console.error(
-        "❌ PDF buffer is invalid:",
+        "❌ PDF buffer is suspiciously small:",
         pdfBuffer ? pdfBuffer.length : "undefined",
       );
       return res.status(500).json({ message: "PDF generation failed" });
