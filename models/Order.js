@@ -40,8 +40,12 @@ const orderSchema = new mongoose.Schema(
     },
 
     shippingAddress: {
-      location: { type: String, trim: true }, // e.g. "Eastleigh, Nairobi"
-      additionalInfo: { type: String, trim: true }, // landmark, gate, notes
+      location: { type: String, trim: true },
+      additionalInfo: { type: String, trim: true },
+
+      latitude: { type: Number },
+      longitude: { type: Number },
+      distanceKm: { type: Number },
     },
 
     payment: {
@@ -112,5 +116,4 @@ orderSchema.pre("save", async function () {
   this.total = this.subtotal + this.shippingFee;
 });
 
-module.exports = mongoose.model("Order", orderSchema);
 module.exports = mongoose.model("Order", orderSchema);

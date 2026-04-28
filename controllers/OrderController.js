@@ -2,6 +2,7 @@ const Product = require("../models/Product");
 const Order = require("../models/Order");
 const catchAsync = require("../utils/catchAsync");
 const AppError = require("../utils/AppError");
+const { calculateShippingFee } = require("../utils/shipping");
 
 exports.createOrder = catchAsync(async (req, res, next) => {
   const { items, customer, paymentMethod, fulfillmentMethod, shippingAddress } =
@@ -61,7 +62,13 @@ exports.createOrder = catchAsync(async (req, res, next) => {
   }
 
   // You can later make this dynamic
-  const shippingFee = finalFulfillmentMethod === "home_delivery" ? 150 : 0;
+  // const shippingFee = finalFulfillmentMethod === "home_delivery" ? 150 : 0;
+
+  const { shippingFee, distanceKm } = calculateShippingFee(
+    shippingAddress?.latitude,
+    shippingAddress?.longitude,
+    finalFulfillmentMethod,
+  );
 
   const savedEmail = email || req.user?.email || "";
 
@@ -84,6 +91,15 @@ exports.createOrder = catchAsync(async (req, res, next) => {
           ? shippingAddress?.location || ""
           : "",
       additionalInfo: shippingAddress?.additionalInfo || "",
+      latitude:
+        finalFulfillmentMethod === "home_delivery"
+          ? shippingAddress?.latitude
+          : undefined,
+      longitude:
+        finalFulfillmentMethod === "home_delivery"
+          ? shippingAddress?.longitude
+          : undefined,
+      distanceKm: finalFulfillmentMethod === "home_delivery" ? distanceKm : 0,
     },
     orderStatus: "pending_payment",
     payment: {
@@ -98,11 +114,13 @@ exports.createOrder = catchAsync(async (req, res, next) => {
       order: {
         id: order._id,
         orderNumber: order.orderNumber,
-        total: order.total,
         items: order.items,
         customer: order.customer,
         fulfillment: order.fulfillment,
         shippingAddress: order.shippingAddress,
+        shippingFee: order.shippingFee,
+        subtotal: order.subtotal,
+        total: order.total,
         orderStatus: order.orderStatus,
         payment: order.payment,
         createdAt: order.createdAt,
@@ -236,6 +254,64 @@ exports.cancelUnpaidOrder = catchAsync(async (req, res, next) => {
   res.status(200).json({
     status: "success",
     message: "Order cancelled successfully",
+    data: { order },
+  });
+});
+
+exports.getButcherOrders = catchAsync(async (req, res, next) => {
+  const orders = await Order.find({
+    orderStatus: {
+      $in: ["confirmed", "processing", "shipped", "ready_for_pickup"],
+    },
+  })
+    .sort({ createdAt: -1 })
+    .select(
+      "orderNumber subtotal shippingFee total orderStatus payment createdAt items customer fulfillment shippingAddress",
+    );
+
+  const pendingOrders = orders.filter((order) =>
+    ["confirmed", "processing"].includes(order.orderStatus),
+  );
+
+  const completedOrders = orders.filter((order) =>
+    ["shipped", "ready_for_pickup"].includes(order.orderStatus),
+  );
+
+  res.status(200).json({
+    status: "success",
+    data: {
+      pendingOrders,
+      completedOrders,
+    },
+  });
+});
+
+exports.markButcherOrderReady = catchAsync(async (req, res, next) => {
+  const { orderId } = req.params;
+
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    return next(new AppError("Order not found", 404));
+  }
+
+  if (!["confirmed", "processing"].includes(order.orderStatus)) {
+    return next(
+      new AppError(
+        "Only confirmed or processing orders can be marked ready",
+        400,
+      ),
+    );
+  }
+
+  order.orderStatus =
+    order.fulfillment?.method === "pickup" ? "ready_for_pickup" : "shipped";
+
+  await order.save();
+
+  res.status(200).json({
+    status: "success",
+    message: "Order marked as ready",
     data: { order },
   });
 });

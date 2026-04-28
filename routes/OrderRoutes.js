@@ -19,6 +19,20 @@ router.get(
 // Get all orders for the authenticated user
 router.get("/my-orders", authController.protect, orderController.getMyOrders);
 
+router.get(
+  "/butcher",
+  authController.protect,
+  authController.restrictTo("admin", "worker"),
+  orderController.getButcherOrders,
+);
+
+router.patch(
+  "/:orderId/butcher-status",
+  authController.protect,
+  authController.restrictTo("admin", "worker"),
+  orderController.markButcherOrderReady,
+);
+
 router.patch(
   "/:orderId/cancel",
   authController.protect,
