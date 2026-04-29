@@ -70,7 +70,7 @@ exports.initalizePayment = catchAsync(async (req, res, next) => {
     return res.status(200).json({
       status: "success",
       data: {
-        authorizationUrl: null,
+        authorizationUrl: `https://checkout.paystack.com/${order.payment.card.accessCode}`,
         accessCode: order.payment.card.accessCode,
         reference: order.payment.card.paymentIntentId,
       },
@@ -136,6 +136,7 @@ exports.initalizePayment = catchAsync(async (req, res, next) => {
     provider: "paystack",
     paymentIntentId: data.data.reference,
     accessCode: data.data.access_code,
+    authorizationUrl: data.data.authorization_url,
   };
 
   if (!order.customer.email) {
