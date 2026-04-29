@@ -99,7 +99,11 @@ exports.createOrder = catchAsync(async (req, res, next) => {
         finalFulfillmentMethod === "home_delivery"
           ? shippingAddress?.longitude
           : undefined,
-      distanceKm: finalFulfillmentMethod === "home_delivery" ? distanceKm : 0,
+      distanceKm:
+        finalFulfillmentMethod === "home_delivery" &&
+        Number.isFinite(Number(distanceKm))
+          ? Number(distanceKm)
+          : 0,
     },
     orderStatus: "pending_payment",
     payment: {

@@ -1,8 +1,27 @@
 const SHOP_LAT = Number(process.env.SHOP_LAT);
 const SHOP_LNG = Number(process.env.SHOP_LNG);
 
+function isValidNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
 function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  lat1 = Number(lat1);
+  lon1 = Number(lon1);
+  lat2 = Number(lat2);
+  lon2 = Number(lon2);
+
+  if (
+    !isValidNumber(lat1) ||
+    !isValidNumber(lon1) ||
+    !isValidNumber(lat2) ||
+    !isValidNumber(lon2)
+  ) {
+    return 0;
+  }
+
   const R = 6371;
+
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
@@ -12,7 +31,9 @@ function calculateDistanceKm(lat1, lon1, lat2, lon2) {
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
 
-  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+  const distance = R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+
+  return Number.isFinite(distance) ? distance : 0;
 }
 
 function calculateShippingFee(customerLat, customerLng, fulfillmentMethod) {
@@ -23,18 +44,25 @@ function calculateShippingFee(customerLat, customerLng, fulfillmentMethod) {
     };
   }
 
-  if (!customerLat || !customerLng) {
+  if (!isValidNumber(SHOP_LAT) || !isValidNumber(SHOP_LNG)) {
     return {
       shippingFee: 150,
-      distanceKm: null,
+      distanceKm: 0,
+    };
+  }
+
+  if (!isValidNumber(customerLat) || !isValidNumber(customerLng)) {
+    return {
+      shippingFee: 150,
+      distanceKm: 0,
     };
   }
 
   const distanceKm = calculateDistanceKm(
     SHOP_LAT,
     SHOP_LNG,
-    Number(customerLat),
-    Number(customerLng),
+    customerLat,
+    customerLng,
   );
 
   let shippingFee = 150;
